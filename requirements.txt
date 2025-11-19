@@ -20,3 +20,4 @@ seaborn
 mlflow
 pyyaml
 joblib
+geopy
