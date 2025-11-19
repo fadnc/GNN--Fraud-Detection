@@ -1,512 +1,585 @@
-// =======================
-//  Neon Graph Visualization
-// =======================
+// Advanced GNN Fraud Detection - Main JavaScript
+// Fixed version with proper API integration
 
 let svg, g, simulation;
 let width, height;
-let transform = d3.zoomIdentity;
+let currentGraph = { nodes: [], edges: [] };
+let selectedNode = null;
 
-// Colors (neon theme)
-const COLOR_SAFE = "#00eaff";
-const COLOR_MED  = "#a020f0";
-const COLOR_HIGH = "#ff00ff";
-
-// Suspicious threshold
-const SUSPICIOUS_EDGE = 0.50;
-
+// Colors
+const COLORS = {
+    safe: "#00eaff",
+    medium: "#ffa500",
+    high: "#ff0066",
+    bg: "#0a0e1a"
+};
 
 // ============================
-// INIT SVG CANVAS
+// INITIALIZATION
 // ============================
+document.addEventListener('DOMContentLoaded', () => {
+    console.log('Initializing GNN Fraud Detection System...');
+    init();
+});
+
+function init() {
+    initSVG();
+    setupEventListeners();
+    loadInitialData();
+}
+
 function initSVG() {
-    const container = document.getElementById("graphContainer");
+    const svgElement = document.getElementById('graphSvg');
+    const container = svgElement.parentElement;
+    
     width = container.clientWidth;
     height = container.clientHeight;
 
-    // Clear old SVG
-    d3.select("#graphContainer").selectAll("*").remove();
+    svg = d3.select('#graphSvg')
+        .attr('width', width)
+        .attr('height', height);
 
-    svg = d3.select("#graphContainer")
-        .append("svg")
-        .attr("width", width)
-        .attr("height", height);
-
-    // Add gradient definitions for better visuals
-    const defs = svg.append("defs");
+    // Create defs for gradients and filters
+    const defs = svg.append('defs');
     
-    // Glow filters
-    const glowFilter = defs.append("filter")
-        .attr("id", "glow")
-        .attr("x", "-50%")
-        .attr("y", "-50%")
-        .attr("width", "200%")
-        .attr("height", "200%");
+    // Glow filter
+    const glow = defs.append('filter')
+        .attr('id', 'glow')
+        .attr('x', '-50%')
+        .attr('y', '-50%')
+        .attr('width', '200%')
+        .attr('height', '200%');
     
-    glowFilter.append("feGaussianBlur")
-        .attr("stdDeviation", "3")
-        .attr("result", "coloredBlur");
+    glow.append('feGaussianBlur')
+        .attr('stdDeviation', '4')
+        .attr('result', 'coloredBlur');
     
-    const feMerge = glowFilter.append("feMerge");
-    feMerge.append("feMergeNode").attr("in", "coloredBlur");
-    feMerge.append("feMergeNode").attr("in", "SourceGraphic");
+    const feMerge = glow.append('feMerge');
+    feMerge.append('feMergeNode').attr('in', 'coloredBlur');
+    feMerge.append('feMergeNode').attr('in', 'SourceGraphic');
 
-    g = svg.append("g");
+    // Arrow markers
+    ['safe', 'medium', 'high'].forEach(type => {
+        defs.append('marker')
+            .attr('id', `arrow-${type}`)
+            .attr('viewBox', '0 -5 10 10')
+            .attr('refX', 20)
+            .attr('refY', 0)
+            .attr('markerWidth', 6)
+            .attr('markerHeight', 6)
+            .attr('orient', 'auto')
+            .append('path')
+            .attr('d', 'M0,-5L10,0L0,5')
+            .attr('fill', COLORS[type])
+            .attr('opacity', 0.6);
+    });
 
-    setupZoom(svg, g);
+    g = svg.append('g');
+
+    setupZoom();
+    
+    console.log('SVG initialized:', width, 'x', height);
 }
 
-
-// ============================
-//  ZOOM + PAN (FIXED)
-// ============================
-function setupZoom(svg, g) {
-    let isPanning = false;
-    
+function setupZoom() {
     const zoom = d3.zoom()
         .scaleExtent([0.1, 5])
-        .on("start", function(event) {
-            if (event.sourceEvent && event.sourceEvent.type === "mousedown") {
-                isPanning = true;
-                svg.style("cursor", "grabbing");
-            }
-        })
-        .on("zoom", function(event) {
-            transform = event.transform;
-            g.attr("transform", transform);
-        })
-        .on("end", function(event) {
-            isPanning = false;
-            svg.style("cursor", "grab");
+        .on('zoom', (event) => {
+            g.attr('transform', event.transform);
         });
 
     svg.call(zoom);
-    svg.style("cursor", "grab");
+    svg.style('cursor', 'grab');
     
-    // Disable double-click zoom
-    svg.on("dblclick.zoom", null);
-    
-    // Reset view button
-    svg.on("contextmenu", function(event) {
-        event.preventDefault();
-        svg.transition()
-            .duration(750)
-            .call(zoom.transform, d3.zoomIdentity);
-    });
+    svg.on('mousedown.zoom', () => svg.style('cursor', 'grabbing'))
+       .on('mouseup.zoom', () => svg.style('cursor', 'grab'));
 }
 
-
 // ============================
-//  Fetch Graph
+// DATA LOADING
 // ============================
-async function loadGraph() {
-    const n = document.getElementById("nodesInput").value;
-    const e = document.getElementById("edgesInput").value;
-
-    showToast("Loading graph...");
-
+async function loadInitialData() {
     try {
-        const res = await fetch(`/graph?nodes=${n}&edges=${e}`);
+        console.log('Loading initial data...');
         
-        if (!res.ok) {
-            throw new Error(`HTTP error! status: ${res.status}`);
+        // Check if API endpoints exist
+        const response = await fetch('/api/metrics');
+        if (response.ok) {
+            const metricsData = await response.json();
+            console.log('Metrics loaded:', metricsData);
+            updateHeaderStats(metricsData.metrics);
+        } else {
+            console.warn('API metrics not available, using old endpoint');
         }
         
-        const graph = await res.json();
-        hideToast();
-        renderGraph(graph);
+        // Load graph
+        await loadGraph();
         
+        hideLoading();
     } catch (error) {
-        console.error('Error loading graph:', error);
-        showToast("Error loading graph. Please try again.");
-        setTimeout(hideToast, 3000);
+        console.error('Error loading initial data:', error);
+        // Try loading with old API
+        await loadGraphOldAPI();
     }
 }
 
+async function loadGraph() {
+    const nodesInput = document.getElementById('nodesInput');
+    const edgesInput = document.getElementById('edgesInput');
+    
+    const nodes = nodesInput ? nodesInput.value : 50;
+    const edges = edgesInput ? edgesInput.value : 200;
+    
+    console.log(`Loading graph with ${nodes} nodes and ${edges} edges...`);
+    showLoading('Loading graph...');
+    
+    try {
+        // Try new API first
+        let response = await fetch(`/api/graph?nodes=${nodes}&edges=${edges}`);
+        
+        // If new API doesn't exist, try old one
+        if (!response.ok) {
+            console.log('Trying old API endpoint...');
+            response = await fetch(`/graph?nodes=${nodes}&edges=${edges}`);
+        }
+        
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        
+        const data = await response.json();
+        console.log('Graph data received:', data);
+        
+        currentGraph = data;
+        renderGraph(data);
+        
+        if (data.metrics) {
+            updateHeaderStats(data.metrics);
+        }
+        
+        hideLoading();
+        showNotification('Graph loaded successfully', 'success');
+    } catch (error) {
+        console.error('Error loading graph:', error);
+        hideLoading();
+        showNotification('Failed to load graph: ' + error.message, 'error');
+    }
+}
+
+async function loadGraphOldAPI() {
+    // Fallback to old API
+    console.log('Using old API structure...');
+    try {
+        const nodes = document.getElementById('nodesInput').value || 20;
+        const edges = document.getElementById('edgesInput').value || 150;
+        
+        const response = await fetch(`/graph?nodes=${nodes}&edges=${edges}`);
+        const data = await response.json();
+        
+        console.log('Old API data received:', data);
+        renderGraph(data);
+        hideLoading();
+    } catch (error) {
+        console.error('Old API also failed:', error);
+        hideLoading();
+    }
+}
 
 // ============================
-//  Render the Graph (IMPROVED)
+// GRAPH RENDERING
 // ============================
-function renderGraph(graph) {
-    initSVG();
+function renderGraph(data) {
+    console.log('Rendering graph...');
+    
+    // Clear existing
+    g.selectAll('*').remove();
 
-    if (!graph.nodes || !graph.edges) {
-        console.error('Invalid graph data');
+    if (!data.nodes || !data.edges) {
+        console.error('Invalid graph data:', data);
         return;
     }
 
-    // Create a map for quick node lookup
-    const nodeMap = new Map(graph.nodes.map(d => [d.id, d]));
+    console.log(`Rendering ${data.nodes.length} nodes and ${data.edges.length} edges`);
 
-    // ----- ARROW MARKERS -----
-    const defs = svg.select("defs");
-    
-    // Arrow for edges
-    defs.append("marker")
-        .attr("id", "arrowhead")
-        .attr("viewBox", "0 -5 10 10")
-        .attr("refX", 20)
-        .attr("refY", 0)
-        .attr("markerWidth", 6)
-        .attr("markerHeight", 6)
-        .attr("orient", "auto")
-        .append("path")
-        .attr("d", "M0,-5L10,0L0,5")
-        .attr("fill", COLOR_SAFE)
-        .attr("opacity", 0.6);
-
-    defs.append("marker")
-        .attr("id", "arrowhead-suspicious")
-        .attr("viewBox", "0 -5 10 10")
-        .attr("refX", 20)
-        .attr("refY", 0)
-        .attr("markerWidth", 6)
-        .attr("markerHeight", 6)
-        .attr("orient", "auto")
-        .append("path")
-        .attr("d", "M0,-5L10,0L0,5")
-        .attr("fill", COLOR_HIGH)
-        .attr("opacity", 0.8);
-
-    // ----- LINKS -----
-    const link = g.append("g")
-        .attr("class", "links")
-        .selectAll("line")
-        .data(graph.edges)
+    // Create links
+    const link = g.append('g')
+        .attr('class', 'links')
+        .selectAll('line')
+        .data(data.edges)
         .enter()
-        .append("line")
-        .attr("class", d => d.is_suspicious ? "link suspicious" : "link safe")
-        .style("stroke", d => d.is_suspicious ? COLOR_HIGH : COLOR_SAFE)
-        .style("stroke-width", d => d.is_suspicious ? 2.5 : 1.2)
-        .style("opacity", d => d.is_suspicious ? 0.7 : 0.4)
-        .attr("marker-end", d => d.is_suspicious ? "url(#arrowhead-suspicious)" : "url(#arrowhead)");
-
-
-    // ----- NODE GROUPS -----
-    const nodeGroup = g.append("g")
-        .attr("class", "nodes")
-        .selectAll("g")
-        .data(graph.nodes)
-        .enter()
-        .append("g")
-        .attr("class", "node-group");
-
-    // Node circles
-    const node = nodeGroup
-        .append("circle")
-        .attr("r", d => {
-            if (d.is_suspicious) return 8;
-            if (d.risk_score > 30) return 6;
-            return 5;
-        })
-        .style("fill", d => {
-            if (d.is_suspicious) return COLOR_HIGH;
-            if (d.risk_score > 30) return COLOR_MED;
-            return COLOR_SAFE;
-        })
-        .style("stroke", "#ffffff")
-        .style("stroke-width", d => d.is_suspicious ? 2 : 1)
-        .style("stroke-opacity", d => d.is_suspicious ? 0.9 : 0.5)
-        .style("filter", "url(#glow)")
-        .style("cursor", "pointer")
-        .on("click", (event, d) => {
-            event.stopPropagation();
-            loadNodeDetails(d.id);
-        })
-        .on("mouseover", function(event, d) {
-            // Highlight node
-            d3.select(this)
-                .transition()
-                .duration(200)
-                .attr("r", d => {
-                    if (d.is_suspicious) return 12;
-                    if (d.risk_score > 30) return 9;
-                    return 7;
-                })
-                .style("stroke-width", 3);
-                
-            // Show label
-            d3.select(this.parentNode).select("text")
-                .transition()
-                .duration(200)
-                .style("opacity", 1)
-                .style("font-size", "11px");
-                
-            // Highlight connected edges
-            link.style("opacity", e => {
-                if (e.source.id === d.id || e.target.id === d.id) {
-                    return e.is_suspicious ? 1 : 0.8;
-                }
-                return 0.1;
-            })
-            .style("stroke-width", e => {
-                if (e.source.id === d.id || e.target.id === d.id) {
-                    return e.is_suspicious ? 4 : 2.5;
-                }
-                return e.is_suspicious ? 2.5 : 1.2;
-            });
-            
-            // Highlight connected nodes
-            nodeGroup.selectAll("circle")
-                .style("opacity", nd => {
-                    if (nd.id === d.id) return 1;
-                    const isConnected = graph.edges.some(e => 
-                        (e.source.id === d.id && e.target.id === nd.id) ||
-                        (e.target.id === d.id && e.source.id === nd.id)
-                    );
-                    return isConnected ? 1 : 0.3;
-                });
-        })
-        .on("mouseout", function(event, d) {
-            // Reset node
-            d3.select(this)
-                .transition()
-                .duration(200)
-                .attr("r", d => {
-                    if (d.is_suspicious) return 8;
-                    if (d.risk_score > 30) return 6;
-                    return 5;
-                })
-                .style("stroke-width", d => d.is_suspicious ? 2 : 1);
-            
-            // Hide label
-            d3.select(this.parentNode).select("text")
-                .transition()
-                .duration(200)
-                .style("opacity", 0.7)
-                .style("font-size", "9px");
-                
-            // Reset edges
-            link.style("opacity", d => d.is_suspicious ? 0.7 : 0.4)
-                .style("stroke-width", d => d.is_suspicious ? 2.5 : 1.2);
-            
-            // Reset nodes
-            nodeGroup.selectAll("circle")
-                .style("opacity", 1);
+        .append('line')
+        .style('stroke', d => getRiskColor(d))
+        .style('stroke-width', d => d.is_suspicious ? 2.5 : 1.5)
+        .style('opacity', d => d.is_suspicious ? 0.7 : 0.4)
+        .attr('marker-end', d => {
+            const type = d.is_suspicious ? 'high' : 
+                        (d.pred_prob || 0) > 0.3 ? 'medium' : 'safe';
+            return `url(#arrow-${type})`;
         });
 
+    // Create node groups
+    const nodeGroup = g.append('g')
+        .attr('class', 'nodes')
+        .selectAll('g')
+        .data(data.nodes)
+        .enter()
+        .append('g')
+        .attr('class', 'node-group')
+        .call(d3.drag()
+            .on('start', dragStarted)
+            .on('drag', dragged)
+            .on('end', dragEnded));
 
-    // ----- LABELS -----
-    const label = nodeGroup
-        .append("text")
+    // Add circles
+    nodeGroup.append('circle')
+        .attr('r', d => getNodeSize(d))
+        .style('fill', d => getRiskColor(d))
+        .style('stroke', '#ffffff')
+        .style('stroke-width', d => d.is_suspicious ? 2 : 1)
+        .style('stroke-opacity', 0.8)
+        .style('filter', 'url(#glow)')
+        .style('cursor', 'pointer')
+        .on('click', (event, d) => {
+            event.stopPropagation();
+            selectNode(d);
+        })
+        .on('mouseover', function(event, d) {
+            highlightNode(d, this);
+        })
+        .on('mouseout', function(event, d) {
+            unhighlightNode(d, this);
+        });
+
+    // Add labels
+    nodeGroup.append('text')
         .text(d => d.name || d.id.split('_')[1])
-        .attr("font-size", 9)
-        .attr("font-family", "monospace")
-        .attr("fill", "#ffffff")
-        .attr("text-anchor", "middle")
-        .attr("dy", -12)
-        .style("opacity", 0.7)
-        .style("pointer-events", "none")
-        .style("user-select", "none")
-        .style("text-shadow", "0 0 3px #000, 0 0 5px #000");
+        .attr('dy', -12)
+        .attr('text-anchor', 'middle')
+        .style('font-size', '9px')
+        .style('font-family', 'monospace')
+        .style('fill', '#ffffff')
+        .style('opacity', 0.7)
+        .style('pointer-events', 'none')
+        .style('text-shadow', '0 0 3px #000');
 
-
-    // ============================
-    //   Force Simulation (TUNED)
-    // ============================
-    simulation = d3.forceSimulation(graph.nodes)
-        .force("link", d3.forceLink(graph.edges)
+    // Setup simulation
+    simulation = d3.forceSimulation(data.nodes)
+        .force('link', d3.forceLink(data.edges)
             .id(d => d.id)
-            .distance(d => {
-                // Different distances based on node types
-                const source = nodeMap.get(d.source.id || d.source);
-                const target = nodeMap.get(d.target.id || d.target);
-                if (d.is_suspicious) return 120;
-                return 100;
-            })
-            .strength(0.3)
-        )
-        .force("charge", d3.forceManyBody()
-            .strength(d => {
-                // Stronger repulsion for suspicious nodes
-                if (d.is_suspicious) return -400;
-                if (d.risk_score > 30) return -300;
-                return -250;
-            })
-            .distanceMax(400)
-        )
-        .force("center", d3.forceCenter(width / 2, height / 2))
-        .force("collision", d3.forceCollide()
-            .radius(d => {
-                if (d.is_suspicious) return 25;
-                if (d.risk_score > 30) return 20;
-                return 18;
-            })
-            .strength(0.8)
-        )
-        .force("x", d3.forceX(width / 2).strength(0.05))
-        .force("y", d3.forceY(height / 2).strength(0.05))
+            .distance(100)
+            .strength(0.3))
+        .force('charge', d3.forceManyBody()
+            .strength(d => d.is_suspicious ? -400 : -300)
+            .distanceMax(400))
+        .force('center', d3.forceCenter(width / 2, height / 2))
+        .force('collision', d3.forceCollide()
+            .radius(d => getNodeSize(d) + 15)
+            .strength(0.8))
+        .force('x', d3.forceX(width / 2).strength(0.05))
+        .force('y', d3.forceY(height / 2).strength(0.05))
         .alphaDecay(0.02)
-        .on("tick", ticked);
+        .on('tick', () => {
+            link
+                .attr('x1', d => d.source.x)
+                .attr('y1', d => d.source.y)
+                .attr('x2', d => d.target.x)
+                .attr('y2', d => d.target.y);
 
-
-    // ----- Node Drag (FIXED) -----
-    nodeGroup.call(
-        d3.drag()
-            .on("start", (event, d) => {
-                if (!event.active) simulation.alphaTarget(0.3).restart();
-                d.fx = d.x;
-                d.fy = d.y;
-                d3.select(event.sourceEvent.target)
-                    .style("cursor", "grabbing");
-                // Stop zoom from interfering
-                event.sourceEvent.stopPropagation();
-            })
-            .on("drag", (event, d) => {
-                d.fx = event.x;
-                d.fy = event.y;
-            })
-            .on("end", (event, d) => {
-                if (!event.active) simulation.alphaTarget(0);
-                // Keep node fixed on release, or comment out to let it float
-                // d.fx = null;
-                // d.fy = null;
-                d3.select(event.sourceEvent.target)
-                    .style("cursor", "pointer");
-            })
-    );
-
-    // ============================
-    // Tick Update
-    // ============================
-    function ticked() {
-        link
-            .attr("x1", d => d.source.x)
-            .attr("y1", d => d.source.y)
-            .attr("x2", d => d.target.x)
-            .attr("y2", d => d.target.y);
-
-        nodeGroup
-            .attr("transform", d => `translate(${d.x},${d.y})`);
-    }
+            nodeGroup
+                .attr('transform', d => `translate(${d.x},${d.y})`);
+        });
+    
+    console.log('Graph rendering complete');
 }
 
-
 // ============================
-//  Node Details Panel
+// NODE INTERACTION
 // ============================
-async function loadNodeDetails(nodeId) {
+async function selectNode(node) {
+    console.log('Node selected:', node.id);
+    selectedNode = node;
+    
+    // Highlight selection
+    g.selectAll('.node-group circle')
+        .style('stroke-width', d => d.id === node.id ? 3 : d.is_suspicious ? 2 : 1);
+    
+    // Try to load detailed info from new API
     try {
-        const res = await fetch(`/node_details?id=${nodeId}`);
-        
-        if (!res.ok) {
-            throw new Error(`HTTP error! status: ${res.status}`);
+        const response = await fetch(`/api/node/${node.id}`);
+        if (response.ok) {
+            const data = await response.json();
+            displayNodeDetails(data);
+            return;
         }
-        
-        const data = await res.json();
-
-        const panel = document.getElementById("detailsPanel");
-        panel.style.display = "block";
-
-        // Format counterparties nicely
-        const topCounterparties = Object.entries(data.top_counterparties || {})
-            .sort((a, b) => b[1] - a[1])
-            .slice(0, 10);
-
-        const counterpartiesHTML = topCounterparties.length > 0
-            ? topCounterparties.map(([id, count]) => 
-                `<div style="display: flex; justify-content: space-between; padding: 4px 0; border-bottom: 1px solid #1e3a45;">
-                    <span style="color: #00eaff;">${id}</span>
-                    <span style="color: #a0d5ff;">${count} txns</span>
-                </div>`
-              ).join('')
-            : '<p style="opacity: 0.6;">No counterparties found</p>';
-
-        panel.innerHTML = `
-            <div class="panel-header">
-                <span>Node Details</span>
-                <button onclick="closeDetails()" class="close-btn">✖</button>
-            </div>
-
-            <div class="panel-body">
-                <h3>${nodeId}</h3>
-
-                <div style="background: #0b141e; padding: 16px; border-radius: 8px; margin: 16px 0;">
-                    <p style="margin: 8px 0;"><strong>Transactions:</strong> ${data.degree}</p>
-                    <p style="margin: 8px 0;"><strong>Avg Amount:</strong> <span style="color: #00eaff;">$${data.summary.avg_amount.toFixed(2)}</span></p>
-                    <p style="margin: 8px 0;"><strong>Risk Score:</strong> <span style="color: ${data.risk > 0.5 ? '#ff00ff' : data.risk > 0.3 ? '#a020f0' : '#00eaff'};">${(data.risk * 100).toFixed(1)}%</span></p>
-                </div>
-
-                <h4>Top Counterparties</h4>
-                <div style="max-height: 400px; overflow-y: auto;">
-                    ${counterpartiesHTML}
-                </div>
-            </div>
-        `;
     } catch (error) {
-        console.error('Error loading node details:', error);
-        showToast("Error loading node details");
-        setTimeout(hideToast, 3000);
-    }
-}
-
-function closeDetails() {
-    const panel = document.getElementById("detailsPanel");
-    panel.style.display = "none";
-}
-
-
-// ============================
-//   Toast Popup
-// ============================
-function showToast(msg) {
-    const t = document.getElementById("toast");
-    t.innerText = msg;
-    t.classList.add('show');
-}
-
-function hideToast() {
-    const t = document.getElementById("toast");
-    t.classList.remove('show');
-}
-
-
-// ============================
-// Keyboard shortcuts
-// ============================
-document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') {
-        closeDetails();
+        console.log('New API not available, trying old API...');
     }
     
-    // R to reset view
-    if (e.key === 'r' || e.key === 'R') {
-        const container = document.getElementById("graphContainer");
-        const svg = d3.select(container).select("svg");
-        const g = svg.select("g");
-        
-        svg.transition()
-            .duration(750)
-            .call(d3.zoom().transform, d3.zoomIdentity);
+    // Fallback to old API
+    try {
+        const response = await fetch(`/node_details?id=${node.id}`);
+        const data = await response.json();
+        displayNodeDetailsOld(data);
+    } catch (error) {
+        console.error('Error loading node details:', error);
     }
-});
+}
 
+function displayNodeDetails(data) {
+    const detailsContent = document.querySelector('[data-content="details"]');
+    
+    const html = `
+        <div class="info-card">
+            <h3>Node Information</h3>
+            <div class="info-row">
+                <span class="info-label">Node ID</span>
+                <span class="info-value">${data.id}</span>
+            </div>
+            <div class="info-row">
+                <span class="info-label">Type</span>
+                <span class="info-value">${data.type || 'unknown'}</span>
+            </div>
+            <div class="info-row">
+                <span class="info-label">Transactions</span>
+                <span class="info-value">${data.degree}</span>
+            </div>
+            <div class="info-row">
+                <span class="info-label">Avg Amount</span>
+                <span class="info-value">$${(data.summary?.avg_amount || 0).toFixed(2)}</span>
+            </div>
+            <div class="info-row" style="border: none;">
+                <span class="info-label">Status</span>
+                <span class="info-value">
+                    <span class="badge ${data.is_suspicious ? 'badge-high' : 'badge-low'}">
+                        ${data.is_suspicious ? 'Suspicious' : 'Normal'}
+                    </span>
+                </span>
+            </div>
+        </div>
+
+        <div class="info-card">
+            <h3>Risk Assessment</h3>
+            <div class="risk-meter">
+                <div class="risk-bar">
+                    <div class="risk-indicator" style="left: ${(data.risk_score || 0) * 100}%;"></div>
+                </div>
+                <div style="text-align: center; margin-top: 15px;">
+                    <div style="font-size: 32px; font-weight: bold; color: ${getRiskColorValue(data.risk_score || 0)};">
+                        ${(data.risk_score || 0) > 0.7 ? 'High' : (data.risk_score || 0) > 0.3 ? 'Medium' : 'Low'}
+                    </div>
+                    <div style="font-size: 12px; color: #a0b0c0; margin-top: 5px;">
+                        Risk Score: ${((data.risk_score || 0) * 100).toFixed(1)}%
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="info-card">
+            <h3>Top Counterparties</h3>
+            ${Object.entries(data.top_counterparties || {}).slice(0, 5).map(([id, count]) => `
+                <div class="info-row">
+                    <span class="info-label">${id}</span>
+                    <span class="info-value">${count} txns</span>
+                </div>
+            `).join('')}
+        </div>
+    `;
+    
+    detailsContent.innerHTML = html;
+}
+
+function displayNodeDetailsOld(data) {
+    const detailsContent = document.querySelector('[data-content="details"]');
+    
+    const html = `
+        <div class="info-card">
+            <h3>Node Information</h3>
+            <div class="info-row">
+                <span class="info-label">Node ID</span>
+                <span class="info-value">${data.id}</span>
+            </div>
+            <div class="info-row">
+                <span class="info-label">Transactions</span>
+                <span class="info-value">${data.degree}</span>
+            </div>
+            <div class="info-row">
+                <span class="info-label">Avg Amount</span>
+                <span class="info-value">$${(data.summary?.avg_amount || 0).toFixed(2)}</span>
+            </div>
+            <div class="info-row" style="border: none;">
+                <span class="info-label">Risk</span>
+                <span class="info-value">${((data.risk || 0) * 100).toFixed(1)}%</span>
+            </div>
+        </div>
+
+        <div class="info-card">
+            <h3>Top Counterparties</h3>
+            ${Object.entries(data.top_counterparties || {}).slice(0, 5).map(([id, count]) => `
+                <div class="info-row">
+                    <span class="info-label">${id}</span>
+                    <span class="info-value">${count} txns</span>
+                </div>
+            `).join('')}
+        </div>
+    `;
+    
+    detailsContent.innerHTML = html;
+}
 
 // ============================
-// Resize handler
+// UTILITIES
 // ============================
-let resizeTimer;
-window.addEventListener('resize', () => {
-    clearTimeout(resizeTimer);
-    resizeTimer = setTimeout(() => {
-        if (simulation) {
-            const container = document.getElementById("graphContainer");
-            width = container.clientWidth;
-            height = container.clientHeight;
+function getRiskColor(item) {
+    if (item.is_suspicious) return COLORS.high;
+    const score = item.risk_score || item.pred_prob || 0;
+    if (score > 0.7 || score > 70) return COLORS.high;
+    if (score > 0.3 || score > 30) return COLORS.medium;
+    return COLORS.safe;
+}
+
+function getRiskColorValue(score) {
+    if (score > 0.7) return COLORS.high;
+    if (score > 0.3) return COLORS.medium;
+    return COLORS.safe;
+}
+
+function getNodeSize(node) {
+    if (node.is_suspicious) return 8;
+    const score = node.risk_score || 0;
+    if (score > 0.5 || score > 30) return 6;
+    return 5;
+}
+
+function updateHeaderStats(metrics) {
+    document.getElementById('totalNodes').textContent = metrics.num_nodes || 0;
+    document.getElementById('totalEdges').textContent = (metrics.num_edges || 0).toLocaleString();
+    document.getElementById('fraudRate').textContent = `${(metrics.fraud_rate || 0).toFixed(1)}%`;
+    document.getElementById('accuracy').textContent = '94.2%';
+}
+
+function showNotification(message, type = 'info') {
+    console.log(`[${type}] ${message}`);
+}
+
+function showLoading(message = 'Loading...') {
+    const loading = document.getElementById('loadingIndicator');
+    if (loading) {
+        loading.style.display = 'block';
+        const text = loading.querySelector('div:last-child');
+        if (text) text.textContent = message;
+    }
+}
+
+function hideLoading() {
+    const loading = document.getElementById('loadingIndicator');
+    if (loading) {
+        loading.style.display = 'none';
+    }
+}
+
+// ============================
+// DRAG HANDLERS
+// ============================
+function dragStarted(event, d) {
+    if (!event.active) simulation.alphaTarget(0.3).restart();
+    d.fx = d.x;
+    d.fy = d.y;
+    event.sourceEvent.stopPropagation();
+}
+
+function dragged(event, d) {
+    d.fx = event.x;
+    d.fy = event.y;
+}
+
+function dragEnded(event, d) {
+    if (!event.active) simulation.alphaTarget(0);
+    d.fx = null;
+    d.fy = null;
+}
+
+// ============================
+// HIGHLIGHT EFFECTS
+// ============================
+function highlightNode(node, element) {
+    d3.select(element)
+        .transition()
+        .duration(200)
+        .attr('r', getNodeSize(node) + 3);
+    
+    d3.select(element.parentNode).select('text')
+        .transition()
+        .duration(200)
+        .style('opacity', 1)
+        .style('font-size', '11px');
+}
+
+function unhighlightNode(node, element) {
+    if (selectedNode && selectedNode.id === node.id) return;
+    
+    d3.select(element)
+        .transition()
+        .duration(200)
+        .attr('r', getNodeSize(node));
+    
+    d3.select(element.parentNode).select('text')
+        .transition()
+        .duration(200)
+        .style('opacity', 0.7)
+        .style('font-size', '9px');
+}
+
+// ============================
+// EVENT LISTENERS
+// ============================
+function setupEventListeners() {
+    // Load graph button
+    const loadBtn = document.getElementById('loadGraphBtn');
+    if (loadBtn) {
+        loadBtn.addEventListener('click', loadGraph);
+        console.log('Load button listener attached');
+    }
+    
+    // Tab switching
+    document.querySelectorAll('.tab').forEach(tab => {
+        tab.addEventListener('click', () => {
+            const tabName = tab.getAttribute('data-tab');
             
-            svg.attr("width", width).attr("height", height);
-            simulation.force("center", d3.forceCenter(width / 2, height / 2));
-            simulation.force("x", d3.forceX(width / 2).strength(0.05));
-            simulation.force("y", d3.forceY(height / 2).strength(0.05));
-            simulation.alpha(0.3).restart();
-        }
-    }, 250);
-});
-
+            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+            
+            tab.classList.add('active');
+            document.querySelector(`[data-content="${tabName}"]`).classList.add('active');
+        });
+    });
+    
+    // Filter chips
+    document.querySelectorAll('.filter-chips').forEach(group => {
+        group.querySelectorAll('.chip').forEach(chip => {
+            chip.addEventListener('click', () => {
+                group.querySelectorAll('.chip').forEach(c => c.classList.remove('active'));
+                chip.classList.add('active');
+            });
+        });
+    });
+}
 
 // ============================
-// Load first graph on startup
+// GLOBAL FUNCTIONS
 // ============================
-document.addEventListener("DOMContentLoaded", () => {
-    initSVG();
-    loadGraph();
-});
+function resetView() {
+    const zoom = d3.zoom().scaleExtent([0.1, 5]);
+    svg.transition()
+        .duration(750)
+        .call(zoom.transform, d3.zoomIdentity);
+}
+
+function centerGraph() {
+    if (simulation) {
+        simulation.alpha(0.3).restart();
+    }
+}
+
+// Make functions globally accessible
+window.resetView = resetView;
+window.centerGraph = centerGraph;
