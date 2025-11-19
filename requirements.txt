@@ -3,9 +3,6 @@ torch==2.5.1+cu121
 torchvision==0.20.1+cu121
 torchaudio==2.5.1+cu121
 
-# --- Graph library (Windows CPU only) ---
-dgl==2.2.1
-
 # --- Data processing (already installed manually) ---
 numpy==1.23.5
 pandas==1.5.3
@@ -21,3 +18,8 @@ mlflow
 pyyaml
 joblib
 geopy
+fastapi
+uvicorn
+pydantic
+Flask
+networkx

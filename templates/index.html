@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FraudGraph Explorer</title>
+    <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+
+    <!-- Sidebar -->
+    <div id="sidebar">
+        <h2>⚡ Controls</h2>
+
+        <label class="label">Nodes:</label>
+        <input id="nodesInput" type="number" value="20" class="input" min="5" max="200">
+
+        <label class="label">Edges:</label>
+        <input id="edgesInput" type="number" value="150" class="input" min="10" max="2000">
+
+        <button onclick="loadGraph()" id="loadBtn">Load Graph</button>
+
+        <h3 class="legend-title">Legend</h3>
+        <div class="legend">
+            <div><span class="dot safe"></span> Safe</div>
+            <div><span class="dot med"></span> Medium Risk</div>
+            <div><span class="dot high"></span> Suspicious</div>
+        </div>
+    </div>
+
+    <!-- Graph Container -->
+    <div id="graphContainer"></div>
+
+    <!-- Node Details Panel -->
+    <div id="detailsPanel"></div>
+
+    <!-- Toast -->
+    <div id="toast"></div>
+
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <script src="/static/main.js"></script>
+</body>
+</html>
