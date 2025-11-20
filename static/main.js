@@ -1,16 +1,25 @@
-// Advanced GNN Fraud Detection - Main JavaScript
-// Fixed version with proper API integration
+// Fixed GNN Fraud Detection Visualization
+// Key fixes:
+// 1. Correct risk color mapping based on actual risk scores
+// 2. Better header stats with fraud insights
+// 3. Proper risk thresholds matching backend logic
 
 let svg, g, simulation;
 let width, height;
 let currentGraph = { nodes: [], edges: [] };
 let selectedNode = null;
 
-// Colors
+// FIXED: Risk thresholds matching backend (70% high, 30-70% medium, <30% low)
+const RISK_THRESHOLDS = {
+    HIGH: 70,    // > 70% = High Risk
+    MEDIUM: 30   // 30-70% = Medium Risk, < 30% = Low Risk
+};
+
+// FIXED: Color palette for risk levels
 const COLORS = {
-    safe: "#00eaff",
-    medium: "#ffa500",
-    high: "#ff0066",
+    safe: "#00ff88",      // Green for safe/low risk
+    medium: "#ffa500",    // Orange for medium risk  
+    high: "#ff0066",      // Red/Pink for high risk
     bg: "#0a0e1a"
 };
 
@@ -18,7 +27,7 @@ const COLORS = {
 // INITIALIZATION
 // ============================
 document.addEventListener('DOMContentLoaded', () => {
-    console.log('Initializing GNN Fraud Detection System...');
+    console.log('🚀 Initializing GNN Fraud Detection System...');
     init();
 });
 
@@ -39,26 +48,25 @@ function initSVG() {
         .attr('width', width)
         .attr('height', height);
 
-    // Create defs for gradients and filters
     const defs = svg.append('defs');
     
-    // Glow filter
+    // Enhanced glow filter for better visibility
     const glow = defs.append('filter')
         .attr('id', 'glow')
-        .attr('x', '-50%')
-        .attr('y', '-50%')
-        .attr('width', '200%')
-        .attr('height', '200%');
+        .attr('x', '-100%')
+        .attr('y', '-100%')
+        .attr('width', '300%')
+        .attr('height', '300%');
     
     glow.append('feGaussianBlur')
-        .attr('stdDeviation', '4')
+        .attr('stdDeviation', '3')
         .attr('result', 'coloredBlur');
     
     const feMerge = glow.append('feMerge');
     feMerge.append('feMergeNode').attr('in', 'coloredBlur');
     feMerge.append('feMergeNode').attr('in', 'SourceGraphic');
 
-    // Arrow markers
+    // FIXED: Arrow markers with correct colors
     ['safe', 'medium', 'high'].forEach(type => {
         defs.append('marker')
             .attr('id', `arrow-${type}`)
@@ -71,22 +79,19 @@ function initSVG() {
             .append('path')
             .attr('d', 'M0,-5L10,0L0,5')
             .attr('fill', COLORS[type])
-            .attr('opacity', 0.6);
+            .attr('opacity', 0.8);
     });
 
     g = svg.append('g');
-
     setupZoom();
     
-    console.log('SVG initialized:', width, 'x', height);
+    console.log('✅ SVG initialized:', width, 'x', height);
 }
 
 function setupZoom() {
     const zoom = d3.zoom()
         .scaleExtent([0.1, 5])
         .filter(function(event) {
-            // Allow zoom on wheel/pinch, but not on node drag
-            // Return false for mousedown on nodes to prevent interference
             if (event.type === 'mousedown') {
                 const isNode = event.target.closest('.node-group');
                 if (isNode) return false;
@@ -100,7 +105,6 @@ function setupZoom() {
     svg.call(zoom);
     svg.style('cursor', 'grab');
     
-    // Update cursor on pan
     svg.on('mousedown.cursor', function() {
         const isNode = d3.select(event.target).classed('node-group') || 
                        d3.select(event.target.parentNode).classed('node-group');
@@ -119,25 +123,19 @@ function setupZoom() {
 // ============================
 async function loadInitialData() {
     try {
-        console.log('Loading initial data...');
+        console.log('📊 Loading initial data...');
         
-        // Check if API endpoints exist
         const response = await fetch('/api/metrics');
         if (response.ok) {
             const metricsData = await response.json();
-            console.log('Metrics loaded:', metricsData);
+            console.log('📈 Metrics loaded:', metricsData);
             updateHeaderStats(metricsData.metrics);
-        } else {
-            console.warn('API metrics not available, using old endpoint');
         }
         
-        // Load graph
         await loadGraph();
-        
         hideLoading();
     } catch (error) {
-        console.error('Error loading initial data:', error);
-        // Try loading with old API
+        console.error('❌ Error loading initial data:', error);
         await loadGraphOldAPI();
     }
 }
@@ -149,16 +147,14 @@ async function loadGraph() {
     const nodes = nodesInput ? nodesInput.value : 50;
     const edges = edgesInput ? edgesInput.value : 200;
     
-    console.log(`Loading graph with ${nodes} nodes and ${edges} edges...`);
+    console.log(`🔍 Loading graph: ${nodes} nodes, ${edges} edges...`);
     showLoading('Loading graph...');
     
     try {
-        // Try new API first
         let response = await fetch(`/api/graph?nodes=${nodes}&edges=${edges}`);
         
-        // If new API doesn't exist, try old one
         if (!response.ok) {
-            console.log('Trying old API endpoint...');
+            console.log('🔄 Trying old API endpoint...');
             response = await fetch(`/graph?nodes=${nodes}&edges=${edges}`);
         }
         
@@ -167,91 +163,90 @@ async function loadGraph() {
         }
         
         const data = await response.json();
-        console.log('Graph data received:', data);
+        console.log('📦 Graph data received:', {
+            nodes: data.nodes?.length,
+            edges: data.edges?.length,
+            metrics: data.metrics
+        });
         
         currentGraph = data;
         renderGraph(data);
         
         if (data.metrics) {
             updateHeaderStats(data.metrics);
-            updateAnalysisTab();
+            updateAnalysisTab(data.metrics);
         }
         
         hideLoading();
         showNotification('Graph loaded successfully', 'success');
     } catch (error) {
-        console.error('Error loading graph:', error);
+        console.error('❌ Error loading graph:', error);
         hideLoading();
         showNotification('Failed to load graph: ' + error.message, 'error');
     }
 }
 
-async function loadGraphOldAPI() {
-    // Fallback to old API
-    console.log('Using old API structure...');
-    try {
-        const nodes = document.getElementById('nodesInput').value || 20;
-        const edges = document.getElementById('edgesInput').value || 150;
-        
-        const response = await fetch(`/graph?nodes=${nodes}&edges=${edges}`);
-        const data = await response.json();
-        
-        console.log('Old API data received:', data);
-        renderGraph(data);
-        hideLoading();
-    } catch (error) {
-        console.error('Old API also failed:', error);
-        hideLoading();
+// ============================
+// FIXED: RISK COLOR CALCULATION
+// ============================
+function getRiskColor(item) {
+    // Get risk score (0-100 format from backend)
+    let riskScore = item.risk_score || 0;
+    
+    // For edges, use pred_prob which is 0-1
+    if (item.pred_prob !== undefined) {
+        riskScore = item.pred_prob * 100;
     }
+    
+    // Explicit flag takes precedence
+    if (item.is_suspicious === true) {
+        return COLORS.high;
+    }
+    
+    // FIXED: Apply proper thresholds
+    if (riskScore > RISK_THRESHOLDS.HIGH) {
+        return COLORS.high;      // > 70% = RED
+    } else if (riskScore > RISK_THRESHOLDS.MEDIUM) {
+        return COLORS.medium;    // 30-70% = ORANGE
+    } else {
+        return COLORS.safe;      // < 30% = GREEN
+    }
+}
+
+function getNodeSize(node) {
+    let riskScore = node.risk_score || 0;
+    
+    // Flag takes precedence
+    if (node.is_suspicious) return 10;
+    
+    // Size based on risk
+    if (riskScore > RISK_THRESHOLDS.HIGH) return 8;
+    if (riskScore > RISK_THRESHOLDS.MEDIUM) return 6;
+    return 5;
+}
+
+function getRiskLevel(riskScore) {
+    if (riskScore > RISK_THRESHOLDS.HIGH) return { level: 'High', color: COLORS.high };
+    if (riskScore > RISK_THRESHOLDS.MEDIUM) return { level: 'Medium', color: COLORS.medium };
+    return { level: 'Low', color: COLORS.safe };
 }
 
 // ============================
 // GRAPH RENDERING
 // ============================
 function renderGraph(data) {
-    console.log('Rendering graph...');
+    console.log('🎨 Rendering graph...');
     
-    // Clear existing
     g.selectAll('*').remove();
 
     if (!data.nodes || !data.edges) {
-        console.error('Invalid graph data:', data);
+        console.error('❌ Invalid graph data:', data);
         return;
     }
 
-    console.log(`Rendering ${data.nodes.length} nodes and ${data.edges.length} edges`);
+    console.log(`📊 Rendering: ${data.nodes.length} nodes, ${data.edges.length} edges`);
     
-    // Debug: Check a sample node's data
-    if (data.nodes.length > 0) {
-        const sampleNode = data.nodes[0];
-        console.log('Sample node data:', {
-            id: sampleNode.id,
-            type: sampleNode.type,
-            risk_score: sampleNode.risk_score,
-            is_suspicious: sampleNode.is_suspicious
-        });
-    }
-
-    // Create links
-    const link = g.append('g')
-        .attr('class', 'links')
-        .selectAll('line')
-        .data(data.edges)
-        .enter()
-        .append('line')
-        .style('stroke', d => {
-            const color = getRiskColor(d);
-            return color;
-        })
-        .style('stroke-width', d => d.is_suspicious ? 2.5 : 1.5)
-        .style('opacity', d => d.is_suspicious ? 0.7 : 0.4)
-        .attr('marker-end', d => {
-            const type = d.is_suspicious ? 'high' : 
-                        (d.pred_prob || 0) > 0.3 ? 'medium' : 'safe';
-            return `url(#arrow-${type})`;
-        });
-
-    // Debug: Count nodes by color
+    // Debug color distribution
     const colorCounts = { safe: 0, medium: 0, high: 0 };
     data.nodes.forEach(node => {
         const color = getRiskColor(node);
@@ -259,7 +254,24 @@ function renderGraph(data) {
         else if (color === COLORS.medium) colorCounts.medium++;
         else if (color === COLORS.high) colorCounts.high++;
     });
-    console.log('Node color distribution:', colorCounts);
+    console.log('🎨 Node colors:', colorCounts);
+
+    // Create links with proper colors
+    const link = g.append('g')
+        .attr('class', 'links')
+        .selectAll('line')
+        .data(data.edges)
+        .enter()
+        .append('line')
+        .style('stroke', d => getRiskColor(d))
+        .style('stroke-width', d => d.is_suspicious ? 3 : 1.5)
+        .style('opacity', d => d.is_suspicious ? 0.8 : 0.5)
+        .attr('marker-end', d => {
+            const color = getRiskColor(d);
+            if (color === COLORS.high) return 'url(#arrow-high)';
+            if (color === COLORS.medium) return 'url(#arrow-medium)';
+            return 'url(#arrow-safe)';
+        });
 
     // Create node groups
     const nodeGroup = g.append('g')
@@ -274,16 +286,16 @@ function renderGraph(data) {
             .on('drag', dragged)
             .on('end', dragEnded));
 
-    // Add circles
+    // FIXED: Nodes with correct colors
     nodeGroup.append('circle')
         .attr('r', d => getNodeSize(d))
-        .style('fill', d => {
+        .style('fill', d => getRiskColor(d))
+        .style('stroke', d => {
             const color = getRiskColor(d);
-            return color;
+            return color === COLORS.high ? COLORS.high : '#ffffff';
         })
-        .style('stroke', '#ffffff')
-        .style('stroke-width', d => d.is_suspicious ? 2 : 1)
-        .style('stroke-opacity', 0.8)
+        .style('stroke-width', d => d.is_suspicious ? 3 : 1.5)
+        .style('stroke-opacity', 1)
         .style('filter', 'url(#glow)')
         .style('cursor', 'pointer')
         .on('click', (event, d) => {
@@ -316,11 +328,11 @@ function renderGraph(data) {
             .distance(100)
             .strength(0.3))
         .force('charge', d3.forceManyBody()
-            .strength(d => d.is_suspicious ? -400 : -300)
+            .strength(d => d.is_suspicious ? -500 : -350)
             .distanceMax(400))
         .force('center', d3.forceCenter(width / 2, height / 2))
         .force('collision', d3.forceCollide()
-            .radius(d => getNodeSize(d) + 15)
+            .radius(d => getNodeSize(d) + 20)
             .strength(0.8))
         .force('x', d3.forceX(width / 2).strength(0.05))
         .force('y', d3.forceY(height / 2).strength(0.05))
@@ -336,21 +348,48 @@ function renderGraph(data) {
                 .attr('transform', d => `translate(${d.x},${d.y})`);
         });
     
-    console.log('Graph rendering complete');
+    console.log('✅ Graph rendering complete');
 }
 
 // ============================
-// NODE INTERACTION
+// FIXED: HEADER STATS UPDATE
+// ============================
+function updateHeaderStats(metrics) {
+    // Total nodes and edges
+    const totalNodes = metrics.num_nodes || 0;
+    const totalEdges = metrics.num_edges || 0;
+    
+    // FIXED: Use edge-level fraud rate (more accurate)
+    const fraudRate = metrics.fraud_rate || 0;
+    
+    // Model accuracy from metrics or default
+    const modelAcc = metrics.training_accuracy || 94.2;
+    
+    // Update DOM
+    document.getElementById('totalNodes').textContent = totalNodes.toLocaleString();
+    document.getElementById('totalEdges').textContent = totalEdges.toLocaleString();
+    document.getElementById('fraudRate').textContent = `${fraudRate.toFixed(1)}%`;
+    document.getElementById('accuracy').textContent = `${modelAcc.toFixed(1)}%`;
+    
+    console.log('📊 Header stats updated:', {
+        nodes: totalNodes,
+        edges: totalEdges,
+        fraudRate: `${fraudRate.toFixed(1)}%`,
+        accuracy: `${modelAcc.toFixed(1)}%`
+    });
+}
+
+// ============================
+// NODE SELECTION & DETAILS
 // ============================
 async function selectNode(node) {
-    console.log('Node selected:', node.id);
+    console.log('🔍 Node selected:', node.id);
     selectedNode = node;
     
     // Highlight selection
     g.selectAll('.node-group circle')
-        .style('stroke-width', d => d.id === node.id ? 3 : d.is_suspicious ? 2 : 1);
+        .style('stroke-width', d => d.id === node.id ? 4 : d.is_suspicious ? 3 : 1.5);
     
-    // Try to load detailed info from new API
     try {
         const response = await fetch(`/api/node/${node.id}`);
         if (response.ok) {
@@ -359,41 +398,23 @@ async function selectNode(node) {
             return;
         }
     } catch (error) {
-        console.log('New API not available, trying old API...');
+        console.log('⚠️ New API not available, trying old API...');
     }
     
-    // Fallback to old API
     try {
         const response = await fetch(`/node_details?id=${node.id}`);
         const data = await response.json();
         displayNodeDetailsOld(data);
     } catch (error) {
-        console.error('Error loading node details:', error);
+        console.error('❌ Error loading node details:', error);
     }
 }
 
 function displayNodeDetails(data) {
     const detailsContent = document.querySelector('[data-content="details"]');
     
-    // Normalize risk score for display
-    let displayRisk = data.risk_score || 0;
-    let riskPercent = displayRisk;
-    
-    // If risk is between 0-1, convert to percentage
-    if (displayRisk <= 1) {
-        riskPercent = displayRisk * 100;
-    }
-    
-    // Determine risk level text
-    let riskLevel = 'Low';
-    let riskColor = COLORS.safe;
-    if (data.is_suspicious || riskPercent > 70) {
-        riskLevel = 'High';
-        riskColor = COLORS.high;
-    } else if (riskPercent > 30) {
-        riskLevel = 'Medium';
-        riskColor = COLORS.medium;
-    }
+    const riskScore = data.risk_score || 0;
+    const riskInfo = getRiskLevel(riskScore);
     
     const html = `
         <div class="info-card">
@@ -408,17 +429,17 @@ function displayNodeDetails(data) {
             </div>
             <div class="info-row">
                 <span class="info-label">Transactions</span>
-                <span class="info-value">${data.degree}</span>
+                <span class="info-value">${data.degree || 0}</span>
             </div>
             <div class="info-row">
                 <span class="info-label">Avg Amount</span>
-                <span class="info-value">${(data.summary?.avg_amount || 0).toFixed(2)}</span>
+                <span class="info-value">$${(data.summary?.avg_amount || 0).toFixed(2)}</span>
             </div>
             <div class="info-row" style="border: none;">
                 <span class="info-label">Status</span>
                 <span class="info-value">
-                    <span class="badge ${data.is_suspicious ? 'badge-high' : 'badge-low'}">
-                        ${data.is_suspicious ? 'Suspicious' : 'Normal'}
+                    <span class="badge" style="background: ${data.is_suspicious ? 'rgba(255,0,102,0.2)' : 'rgba(0,255,136,0.2)'}; color: ${data.is_suspicious ? '#ff0066' : '#00ff88'}; border: 1px solid ${data.is_suspicious ? '#ff0066' : '#00ff88'};">
+                        ${data.is_suspicious ? '⚠️ Suspicious' : '✓ Normal'}
                     </span>
                 </span>
             </div>
@@ -428,14 +449,14 @@ function displayNodeDetails(data) {
             <h3>Risk Assessment</h3>
             <div class="risk-meter">
                 <div class="risk-bar">
-                    <div class="risk-indicator" style="left: ${riskPercent}%;"></div>
+                    <div class="risk-indicator" style="left: ${riskScore}%; background: ${riskInfo.color};"></div>
                 </div>
                 <div style="text-align: center; margin-top: 15px;">
-                    <div style="font-size: 32px; font-weight: bold; color: ${riskColor};">
-                        ${riskLevel}
+                    <div style="font-size: 32px; font-weight: bold; color: ${riskInfo.color};">
+                        ${riskInfo.level}
                     </div>
                     <div style="font-size: 12px; color: #a0b0c0; margin-top: 5px;">
-                        Risk Score: ${riskPercent.toFixed(2)}%
+                        Risk Score: ${riskScore.toFixed(2)}%
                     </div>
                 </div>
             </div>
@@ -448,76 +469,7 @@ function displayNodeDetails(data) {
                     <span class="info-label">${id}</span>
                     <span class="info-value">${count} txns</span>
                 </div>
-            `).join('')}
-        </div>
-    `;
-    
-    detailsContent.innerHTML = html;
-}
-
-function displayNodeDetailsOld(data) {
-    const detailsContent = document.querySelector('[data-content="details"]');
-    
-    // Normalize risk score - old API uses 'risk' field which is 0-1
-    let riskScore = data.risk || 0;
-    let riskPercent = riskScore * 100;
-    
-    let riskLevel = 'Low';
-    let riskColor = COLORS.safe;
-    if (riskPercent > 70) {
-        riskLevel = 'High';
-        riskColor = COLORS.high;
-    } else if (riskPercent > 30) {
-        riskLevel = 'Medium';
-        riskColor = COLORS.medium;
-    }
-    
-    const html = `
-        <div class="info-card">
-            <h3>Node Information</h3>
-            <div class="info-row">
-                <span class="info-label">Node ID</span>
-                <span class="info-value">${data.id}</span>
-            </div>
-            <div class="info-row">
-                <span class="info-label">Transactions</span>
-                <span class="info-value">${data.degree}</span>
-            </div>
-            <div class="info-row">
-                <span class="info-label">Avg Amount</span>
-                <span class="info-value">${(data.summary?.avg_amount || 0).toFixed(2)}</span>
-            </div>
-            <div class="info-row" style="border: none;">
-                <span class="info-label">Risk</span>
-                <span class="info-value">${riskPercent.toFixed(2)}%</span>
-            </div>
-        </div>
-
-        <div class="info-card">
-            <h3>Risk Assessment</h3>
-            <div class="risk-meter">
-                <div class="risk-bar">
-                    <div class="risk-indicator" style="left: ${riskPercent}%;"></div>
-                </div>
-                <div style="text-align: center; margin-top: 15px;">
-                    <div style="font-size: 32px; font-weight: bold; color: ${riskColor};">
-                        ${riskLevel}
-                    </div>
-                    <div style="font-size: 12px; color: #a0b0c0; margin-top: 5px;">
-                        Risk Score: ${riskPercent.toFixed(2)}%
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <div class="info-card">
-            <h3>Top Counterparties</h3>
-            ${Object.entries(data.top_counterparties || {}).slice(0, 5).map(([id, count]) => `
-                <div class="info-row">
-                    <span class="info-label">${id}</span>
-                    <span class="info-value">${count} txns</span>
-                </div>
-            `).join('')}
+            `).join('') || '<div style="color: #a0b0c0; text-align: center; padding: 1rem;">No data available</div>'}
         </div>
     `;
     
@@ -527,59 +479,8 @@ function displayNodeDetailsOld(data) {
 // ============================
 // UTILITIES
 // ============================
-function getRiskColor(item) {
-    if (item.is_suspicious) return COLORS.high;
-    
-    // Handle different risk score formats
-    let score = item.risk_score || item.pred_prob || 0;
-    
-    // Normalize score to 0-1 range if it's in 0-100 range
-    if (score > 1) {
-        score = score / 100;
-    }
-    
-    // Color based on normalized score
-    if (score > 0.7) return COLORS.high;      // High risk: > 70%
-    if (score > 0.3) return COLORS.medium;     // Medium risk: 30-70%
-    return COLORS.safe;                        // Low risk: < 30%
-}
-
-function getRiskColorValue(score) {
-    // Normalize score to 0-1 range if needed
-    if (score > 1) {
-        score = score / 100;
-    }
-    
-    if (score > 0.7) return COLORS.high;
-    if (score > 0.3) return COLORS.medium;
-    return COLORS.safe;
-}
-
-function getNodeSize(node) {
-    if (node.is_suspicious) return 8;
-    
-    // Handle different risk score formats
-    let score = node.risk_score || 0;
-    
-    // Normalize score to 0-1 range if it's in 0-100 range
-    if (score > 1) {
-        score = score / 100;
-    }
-    
-    // Size based on normalized score
-    if (score > 0.5) return 6;  // Medium-high risk
-    return 5;                    // Low risk
-}
-
-function updateHeaderStats(metrics) {
-    document.getElementById('totalNodes').textContent = metrics.num_nodes || 0;
-    document.getElementById('totalEdges').textContent = (metrics.num_edges || 0).toLocaleString();
-    document.getElementById('fraudRate').textContent = `${(metrics.fraud_rate || 0).toFixed(1)}%`;
-    document.getElementById('accuracy').textContent = '94.2%';
-}
-
 function showNotification(message, type = 'info') {
-    console.log(`[${type}] ${message}`);
+    console.log(`[${type.toUpperCase()}] ${message}`);
 }
 
 function showLoading(message = 'Loading...') {
@@ -602,14 +503,10 @@ function hideLoading() {
 // DRAG HANDLERS
 // ============================
 function dragStarted(event, d) {
-    // Stop propagation to prevent zoom from interfering
     event.sourceEvent.stopPropagation();
-    
     if (!event.active) simulation.alphaTarget(0.3).restart();
     d.fx = d.x;
     d.fy = d.y;
-    
-    // Change cursor
     d3.select(this).style('cursor', 'grabbing');
 }
 
@@ -620,12 +517,8 @@ function dragged(event, d) {
 
 function dragEnded(event, d) {
     if (!event.active) simulation.alphaTarget(0);
-    
-    // Release fixed position so node can move freely
     d.fx = null;
     d.fy = null;
-    
-    // Reset cursor
     d3.select(this).style('cursor', 'pointer');
 }
 
@@ -636,13 +529,14 @@ function highlightNode(node, element) {
     d3.select(element)
         .transition()
         .duration(200)
-        .attr('r', getNodeSize(node) + 3);
+        .attr('r', getNodeSize(node) + 4);
     
     d3.select(element.parentNode).select('text')
         .transition()
         .duration(200)
         .style('opacity', 1)
-        .style('font-size', '11px');
+        .style('font-size', '11px')
+        .style('font-weight', 'bold');
 }
 
 function unhighlightNode(node, element) {
@@ -657,168 +551,55 @@ function unhighlightNode(node, element) {
         .transition()
         .duration(200)
         .style('opacity', 0.7)
-        .style('font-size', '9px');
+        .style('font-size', '9px')
+        .style('font-weight', 'normal');
 }
 
 // ============================
 // EVENT LISTENERS
 // ============================
 function setupEventListeners() {
-    console.log('Setting up event listeners...');
+    console.log('⚙️ Setting up event listeners...');
     
-    // Load graph button
     const loadBtn = document.getElementById('loadGraphBtn');
     if (loadBtn) {
         loadBtn.addEventListener('click', () => {
-            console.log('Load Graph button clicked');
+            console.log('🔄 Load Graph button clicked');
             loadGraph();
         });
-        console.log('Load button listener attached');
     }
     
     // Tab switching
     document.querySelectorAll('.tab').forEach(tab => {
         tab.addEventListener('click', (e) => {
-            console.log('Tab clicked:', tab.getAttribute('data-tab'));
             const tabName = tab.getAttribute('data-tab');
             
-            // Remove active from all tabs and content
             document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
             document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
             
-            // Add active to clicked tab and corresponding content
             tab.classList.add('active');
             const content = document.querySelector(`[data-content="${tabName}"]`);
             if (content) {
                 content.classList.add('active');
-                console.log('Activated tab content:', tabName);
                 
-                // Load data when switching to certain tabs
                 if (tabName === 'alerts') {
                     loadAlerts();
                 } else if (tabName === 'analysis') {
-                    updateAnalysisTab();
+                    updateAnalysisTab(currentGraph.metrics);
                 }
             }
         });
     });
     
-    // Filter chips - Risk Level
-    const riskFilters = document.querySelectorAll('.filter-chips')[0];
-    if (riskFilters) {
-        riskFilters.querySelectorAll('.chip').forEach(chip => {
-            chip.addEventListener('click', (e) => {
-                console.log('Risk filter clicked:', chip.textContent);
-                // Remove active from siblings
-                riskFilters.querySelectorAll('.chip').forEach(c => c.classList.remove('active'));
-                // Add active to clicked chip
-                chip.classList.add('active');
-                // Apply filter
-                applyRiskFilter(chip.textContent.trim());
-            });
-        });
-    }
-    
-    // Filter chips - Node Type
-    const typeFilters = document.querySelectorAll('.filter-chips')[1];
-    if (typeFilters) {
-        typeFilters.querySelectorAll('.chip').forEach(chip => {
-            chip.addEventListener('click', (e) => {
-                console.log('Type filter clicked:', chip.textContent);
-                // Remove active from siblings
-                typeFilters.querySelectorAll('.chip').forEach(c => c.classList.remove('active'));
-                // Add active to clicked chip
-                chip.classList.add('active');
-                // Apply filter
-                applyTypeFilter(chip.textContent.trim());
-            });
-        });
-    }
-    
-    console.log('Event listeners setup complete');
-}
-
-// ============================
-// FILTER FUNCTIONS
-// ============================
-function applyRiskFilter(level) {
-    console.log('Applying risk filter:', level);
-    
-    if (!currentGraph.nodes || currentGraph.nodes.length === 0) {
-        console.log('No graph loaded yet');
-        return;
-    }
-    
-    g.selectAll('.node-group').style('opacity', function(d) {
-        if (level === 'All') return 1;
-        
-        // Normalize risk score
-        let riskScore = d.risk_score || d.pred_prob || 0;
-        if (riskScore > 1) riskScore = riskScore / 100;
-        
-        const isSuspicious = d.is_suspicious;
-        
-        // Filter logic
-        if (level === 'High' && (isSuspicious || riskScore > 0.7)) return 1;
-        if (level === 'Medium' && !isSuspicious && (riskScore > 0.3 && riskScore <= 0.7)) return 1;
-        if (level === 'Low' && !isSuspicious && riskScore <= 0.3) return 1;
-        
-        return 0.2;
-    });
-    
-    // Also filter edges
-    g.selectAll('.links line').style('opacity', function(d) {
-        if (level === 'All') return d.is_suspicious ? 0.7 : 0.4;
-        
-        const sourceNode = currentGraph.nodes.find(n => n.id === d.source.id || n.id === d.source);
-        const targetNode = currentGraph.nodes.find(n => n.id === d.target.id || n.id === d.target);
-        
-        // Show edge if either node matches filter
-        const sourceVisible = g.selectAll('.node-group').filter(n => n.id === (sourceNode?.id || d.source.id || d.source)).style('opacity') == 1;
-        const targetVisible = g.selectAll('.node-group').filter(n => n.id === (targetNode?.id || d.target.id || d.target)).style('opacity') == 1;
-        
-        return (sourceVisible && targetVisible) ? (d.is_suspicious ? 0.7 : 0.4) : 0.1;
-    });
-}
-
-function applyTypeFilter(type) {
-    console.log('Applying type filter:', type);
-    
-    if (!currentGraph.nodes || currentGraph.nodes.length === 0) {
-        console.log('No graph loaded yet');
-        return;
-    }
-    
-    g.selectAll('.node-group').style('opacity', function(d) {
-        if (type === 'All') return 1;
-        if (type === 'Users' && d.type === 'user') return 1;
-        if (type === 'Merchants' && d.type === 'merchant') return 1;
-        return 0.2;
-    });
-    
-    // Also filter edges
-    g.selectAll('.links line').style('opacity', function(d) {
-        if (type === 'All') return d.is_suspicious ? 0.7 : 0.4;
-        
-        const sourceNode = currentGraph.nodes.find(n => n.id === d.source.id || n.id === d.source);
-        const targetNode = currentGraph.nodes.find(n => n.id === d.target.id || n.id === d.target);
-        
-        const sourceVisible = g.selectAll('.node-group').filter(n => n.id === (sourceNode?.id || d.source.id || d.source)).style('opacity') == 1;
-        const targetVisible = g.selectAll('.node-group').filter(n => n.id === (targetNode?.id || d.target.id || d.target)).style('opacity') == 1;
-        
-        return (sourceVisible && targetVisible) ? (d.is_suspicious ? 0.7 : 0.4) : 0.1;
-    });
+    console.log('✅ Event listeners setup complete');
 }
 
 // ============================
 // ANALYSIS TAB UPDATE
 // ============================
-function updateAnalysisTab() {
-    if (!currentGraph.metrics) return;
+function updateAnalysisTab(metrics) {
+    if (!metrics) return;
     
-    const metrics = currentGraph.metrics;
-    
-    // Update metric values
     if (document.getElementById('metric-density')) {
         document.getElementById('metric-density').textContent = (metrics.density || 0).toFixed(4);
     }
@@ -831,8 +612,6 @@ function updateAnalysisTab() {
     if (document.getElementById('metric-communities')) {
         document.getElementById('metric-communities').textContent = metrics.num_communities || 0;
     }
-    
-    // Update fraud statistics
     if (document.getElementById('total-transactions')) {
         document.getElementById('total-transactions').textContent = (metrics.num_edges || 0).toLocaleString();
     }
@@ -845,23 +624,16 @@ function updateAnalysisTab() {
 }
 
 // ============================
-// ALERTS LOADING
+// ALERTS
 // ============================
 async function loadAlerts() {
     try {
-        console.log('Loading alerts...');
         const response = await fetch('/api/alerts?limit=10');
-        
-        if (!response.ok) {
-            console.log('Alerts API not available, using mock data');
-            return;
-        }
-        
+        if (!response.ok) return;
         const data = await response.json();
         displayAlerts(data.alerts);
-        
     } catch (error) {
-        console.log('Error loading alerts:', error);
+        console.log('⚠️ Error loading alerts:', error);
     }
 }
 
@@ -885,12 +657,8 @@ function displayAlerts(alerts) {
 }
 
 function getSeverityColor(severity) {
-    const colors = {
-        high: '#ff0066',
-        medium: '#ffa500',
-        low: '#00eaff'
-    };
-    return colors[severity] || '#00eaff';
+    const colors = { high: '#ff0066', medium: '#ffa500', low: '#00ff88' };
+    return colors[severity] || '#00ff88';
 }
 
 // ============================
@@ -898,17 +666,95 @@ function getSeverityColor(severity) {
 // ============================
 function resetView() {
     const zoom = d3.zoom().scaleExtent([0.1, 5]);
-    svg.transition()
-        .duration(750)
-        .call(zoom.transform, d3.zoomIdentity);
+    svg.transition().duration(750).call(zoom.transform, d3.zoomIdentity);
 }
 
 function centerGraph() {
-    if (simulation) {
-        simulation.alpha(0.3).restart();
+    if (simulation) simulation.alpha(0.3).restart();
+}
+
+window.resetView = resetView;
+window.centerGraph = centerGraph;
+
+// Fallback API support
+async function loadGraphOldAPI() {
+    console.log('🔄 Using old API structure...');
+    try {
+        const nodes = document.getElementById('nodesInput').value || 20;
+        const edges = document.getElementById('edgesInput').value || 150;
+        const response = await fetch(`/graph?nodes=${nodes}&edges=${edges}`);
+        const data = await response.json();
+        renderGraph(data);
+        hideLoading();
+    } catch (error) {
+        console.error('❌ Old API also failed:', error);
+        hideLoading();
     }
 }
 
-// Make functions globally accessible
-window.resetView = resetView;
-window.centerGraph = centerGraph;
+function displayNodeDetailsOld(data) {
+    const detailsContent = document.querySelector('[data-content="details"]');
+    const riskScore = (data.risk || 0) * 100;
+    const riskInfo = getRiskLevel(riskScore);
+    
+    const html = `
+        <div class="info-card">
+            <h3>Node Information</h3>
+            <div class="info-row">
+                <span class="info-label">Node ID</span>
+                <span class="info-value">${data.id}</span>
+            </div>
+            <div class="info-row">
+                <span class="info-label">Transactions</span>
+                <span class="info-value">${data.degree || 0}</span>
+            </div>
+            <div class="info-row">
+                <span class="info-label">Avg Amount</span>
+                <span class="info-value">$${(data.summary?.avg_amount || 0).toFixed(2)}</span>
+            </div>
+            <div class="info-row" style="border: none;">
+                <span class="info-label">Risk</span>
+                <span class="info-value">${riskScore.toFixed(2)}%</span>
+            </div>
+        </div>
+        <div class="info-card">
+            <h3>Risk Assessment</h3>
+            <div class="risk-meter">
+                <div class="risk-bar">
+                    <div class="risk-indicator" style="left: ${riskScore}%; background: ${riskInfo.color};"></div>
+                </div>
+                <div style="text-align: center; margin-top: 15px;">
+                    <div style="font-size: 32px; font-weight: bold; color: ${riskInfo.color};">${riskInfo.level}</div>
+                    <div style="font-size: 12px; color: #a0b0c0; margin-top: 5px;">Risk Score: ${riskScore.toFixed(2)}%</div>
+                </div>
+            </div>
+        </div>
+    `;
+    detailsContent.innerHTML = html;
+}
+
+// Apply risk filter
+function applyRiskFilter(level) {
+    if (!currentGraph.nodes) return;
+    
+    g.selectAll('.node-group').style('opacity', function(d) {
+        if (level === 'All') return 1;
+        const riskScore = d.risk_score || 0;
+        if (level === 'High' && (d.is_suspicious || riskScore > RISK_THRESHOLDS.HIGH)) return 1;
+        if (level === 'Medium' && !d.is_suspicious && (riskScore > RISK_THRESHOLDS.MEDIUM && riskScore <= RISK_THRESHOLDS.HIGH)) return 1;
+        if (level === 'Low' && !d.is_suspicious && riskScore <= RISK_THRESHOLDS.MEDIUM) return 1;
+        return 0.2;
+    });
+}
+
+// Apply type filter
+function applyTypeFilter(type) {
+    if (!currentGraph.nodes) return;
+    
+    g.selectAll('.node-group').style('opacity', function(d) {
+        if (type === 'All') return 1;
+        if (type === 'Users' && d.type === 'user') return 1;
+        if (type === 'Merchants' && d.type === 'merchant') return 1;
+        return 0.2;
+    });
+}
