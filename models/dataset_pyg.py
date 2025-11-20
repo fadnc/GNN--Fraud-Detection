@@ -3,9 +3,14 @@ import torch
 from torch_geometric.loader import NeighborLoader
 from torch_geometric.data import HeteroData
 import os
+import warnings
 
 def load_processed_graph(path="data/processed/fraud_graph_pyg.pt", device='cuda'):
-    checkpoint = torch.load(path, map_location='cpu')
+    # Suppress the FutureWarning for weights_only
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", category=FutureWarning)
+        checkpoint = torch.load(path, map_location='cpu', weights_only=False)
+    
     data = checkpoint['data']
     user_map = checkpoint['user_map']
     merchant_map = checkpoint['merchant_map']
